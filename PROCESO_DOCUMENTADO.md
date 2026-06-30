@@ -112,7 +112,9 @@ sudo systemctl start fail2ban
 
 ## Fase 2: Monitoreo de Recursos
 
-Se implementó monitoreo de los recursos clave del servidor:
+### 2.1 Monitoreo local en el servidor
+
+Se verificó el estado de los recursos directamente en la EC2:
 
 ```bash
 # CPU
@@ -134,7 +136,7 @@ uptime
 systemctl is-active sshd ufw fail2ban
 ```
 
-### Resultados del monitoreo
+### Resultados del monitoreo local
 
 | Recurso | Estado | Valor |
 |---------|--------|-------|
@@ -146,15 +148,80 @@ systemctl is-active sshd ufw fail2ban
 | **ufw** | ✅ Activo | active |
 | **fail2ban** | ✅ Activo | active |
 
-### Umbrales de alerta definidos
-
-| Recurso | Umbral de alerta |
-|---------|-----------------|
-| CPU | > 80% |
-| RAM | > 85% |
-| Disco | > 90% |
-
 ![Monitoreo de recursos](monitoreo.png)
+
+### 2.2 Monitoreo con Amazon CloudWatch
+
+Se configuró CloudWatch como sistema de monitoreo en tiempo real. AWS envía métricas de la EC2 automáticamente (CPU, red, estado) sin necesidad de instalar agentes.
+
+**Rol IAM creado para la EC2:**
+```bash
+# Crear rol con permisos de CloudWatch
+aws iam create-role --role-name fintech-server-cloudwatch-role \
+  --assume-role-policy-document file://trust-policy.json --profile pra_kappa_lab
+
+# Asociar política de CloudWatch
+aws iam attach-role-policy --role-name fintech-server-cloudwatch-role \
+  --policy-arn arn:aws:iam::aws:policy/CloudWatchFullAccess --profile pra_kappa_lab
+
+# Crear y asociar instance profile a la EC2
+aws iam create-instance-profile --instance-profile-name fintech-server-profile --profile pra_kappa_lab
+aws iam add-role-to-instance-profile --instance-profile-name fintech-server-profile \
+  --role-name fintech-server-cloudwatch-role --profile pra_kappa_lab
+aws ec2 associate-iam-instance-profile --instance-id i-018c1c4ee3f89d726 \
+  --iam-instance-profile Name=fintech-server-profile --profile pra_kappa_lab
+```
+
+### 2.3 Alarmas de CloudWatch configuradas
+
+Se crearon alarmas para alertas tempranas en caso de sobrecarga:
+
+```bash
+# Alarma de CPU alta (>80% por más de 10 minutos)
+aws cloudwatch put-metric-alarm --alarm-name "fintech-server-cpu-alta" \
+  --metric-name CPUUtilization --namespace AWS/EC2 \
+  --statistic Average --period 300 --threshold 80 \
+  --comparison-operator GreaterThanThreshold --evaluation-periods 2 \
+  --dimensions Name=InstanceId,Value=i-018c1c4ee3f89d726 \
+  --alarm-description "Alerta: CPU supera el 80%" --profile pra_kappa_lab
+
+# Alarma de tráfico de red excesivo (>50MB en 5 min)
+aws cloudwatch put-metric-alarm --alarm-name "fintech-server-network-in-alta" \
+  --metric-name NetworkIn --namespace AWS/EC2 \
+  --statistic Average --period 300 --threshold 50000000 \
+  --comparison-operator GreaterThanThreshold --evaluation-periods 2 \
+  --dimensions Name=InstanceId,Value=i-018c1c4ee3f89d726 \
+  --alarm-description "Alerta: Trafico de red entrante excesivo" --profile pra_kappa_lab
+
+# Alarma de status check (servidor caído)
+aws cloudwatch put-metric-alarm --alarm-name "fintech-server-status-check" \
+  --metric-name StatusCheckFailed --namespace AWS/EC2 \
+  --statistic Maximum --period 60 --threshold 1 \
+  --comparison-operator GreaterThanOrEqualToThreshold --evaluation-periods 2 \
+  --dimensions Name=InstanceId,Value=i-018c1c4ee3f89d726 \
+  --alarm-description "Alerta: El servidor fallo el status check" --profile pra_kappa_lab
+```
+
+### Resumen de alarmas
+
+| Alarma | Métrica | Umbral | Descripción |
+|--------|---------|--------|-------------|
+| `fintech-server-cpu-alta` | CPUUtilization | > 80% por 10 min | Alerta temprana de sobrecarga |
+| `fintech-server-network-in-alta` | NetworkIn | > 50MB en 5 min | Posible ataque DDoS o tráfico anómalo |
+| `fintech-server-status-check` | StatusCheckFailed | ≥ 1 por 2 min | Servidor caído o inaccesible |
+
+![Alarmas en CloudWatch](alarmas_cloudwatch.png)
+
+### Métricas monitoreadas en CloudWatch (automáticas)
+
+| Métrica | Descripción | Frecuencia |
+|---------|-------------|------------|
+| CPUUtilization | Uso de CPU del servidor | Cada 5 min |
+| NetworkIn | Bytes de tráfico entrante | Cada 5 min |
+| NetworkOut | Bytes de tráfico saliente | Cada 5 min |
+| StatusCheckFailed | Estado de salud de la instancia | Cada 1 min |
+| DiskReadOps | Operaciones de lectura en disco | Cada 5 min |
+| DiskWriteOps | Operaciones de escritura en disco | Cada 5 min |
 
 ---
 
