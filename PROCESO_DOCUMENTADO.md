@@ -332,38 +332,6 @@ sudo apt-get update -y && sudo apt-get upgrade -y
 
 ---
 
-## Arquitectura Implementada
-
-```
-┌─────────────────────────────────────────────────┐
-│                    AWS Cloud                      │
-│  ┌───────────────────────────────────────────┐  │
-│  │         VPC: vpc-cloudops                  │  │
-│  │         CIDR: 10.25.0.0/16               │  │
-│  │  ┌─────────────────────────────────────┐  │  │
-│  │  │   Subnet: sub-cloudops-public1       │  │  │
-│  │  │   AZ: us-east-1a                    │  │  │
-│  │  │                                      │  │  │
-│  │  │   ┌──────────────────────────────┐  │  │  │
-│  │  │   │  EC2: fintech-server         │  │  │  │
-│  │  │   │  IP: 44.201.227.98           │  │  │  │
-│  │  │   │  OS: Ubuntu 22.04           │  │  │  │
-│  │  │   │  Type: t2.micro              │  │  │  │
-│  │  │   │                              │  │  │  │
-│  │  │   │  Servicios:                  │  │  │  │
-│  │  │   │  - SSH (puerto 22)           │  │  │  │
-│  │  │   │  - UFW (firewall)            │  │  │  │
-│  │  │   │  - Fail2Ban (anti-brute)     │  │  │  │
-│  │  │   └──────────────────────────────┘  │  │  │
-│  │  └─────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────┘  │
-│                                                  │
-│  Security Group: fintech-server-sg               │
-│  - Inbound: 22/tcp, 80/tcp, 443/tcp             │
-│  - Outbound: All traffic                         │
-└─────────────────────────────────────────────────┘
-```
-
 ---
 
 ## Respuestas a Dimensiones Evaluadas
@@ -394,7 +362,165 @@ Se definen umbrales de alerta (CPU>80%, RAM>85%, Disco>90%) y se revisan periód
 
 ---
 
-## Comandos de referencia
+---
+
+## Fase 4: Cierre y Documentación Final
+
+### Resumen Ejecutivo
+
+Se implementó exitosamente un sistema completo de gestión de infraestructura para una empresa fintech, cubriendo:
+
+| Fase | Objetivo | Herramientas | Estado |
+|------|----------|--------------|--------|
+| Fase 1 | Configuración del servidor | AWS EC2, UFW, Fail2Ban, SSH | ✅ Completada |
+| Fase 2 | Monitoreo de recursos | CloudWatch, Alarmas, Dashboard | ✅ Completada |
+| Fase 3 | Automatización de parches | SSM Patch Manager, Maintenance Window | ✅ Completada |
+| Fase 4 | Documentación y cierre | Markdown, Git | ✅ Completada |
+
+### Logros alcanzados
+
+- Servidor Ubuntu 22.04 desplegado y hardened en AWS
+- Firewall configurado con principio de mínimo privilegio (solo puertos 22, 80, 443)
+- Protección contra fuerza bruta con Fail2Ban
+- Monitoreo en tiempo real con CloudWatch (dashboard + alarmas)
+- Parcheo automatizado semanal con SSM Patch Manager
+- Toda la infraestructura creada y gestionada vía CLI (reproducible)
+
+---
+
+### Guía de Operaciones
+
+#### Cómo monitorear el servidor
+
+1. **Dashboard en tiempo real:** https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/fintech-server-monitoring
+2. **Alarmas activas:** https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#alarmsV2:
+3. **Monitoreo manual por SSH:**
+   ```bash
+   ssh -i fintech-server-key.pem ubuntu@44.201.227.98
+   htop                          # CPU y RAM en tiempo real
+   df -h                         # Uso de disco
+   sudo ufw status               # Estado del firewall
+   sudo fail2ban-client status   # IPs bloqueadas
+   ```
+
+#### Cómo aplicar parches manualmente
+
+```bash
+# Conectar al servidor
+ssh -i fintech-server-key.pem ubuntu@44.201.227.98
+
+# Verificar parches disponibles
+sudo apt list --upgradable
+
+# Crear backup antes de parchear
+dpkg --get-selections > /tmp/packages_backup_$(date +%Y%m%d).txt
+
+# Aplicar parches
+sudo apt-get update -y && sudo apt-get upgrade -y
+
+# Verificar servicios post-parche
+systemctl is-active sshd ufw fail2ban
+```
+
+#### Cómo escalar el servidor
+
+```bash
+# Detener la instancia
+aws ec2 stop-instances --instance-ids i-018c1c4ee3f89d726 --profile pra_kappa_lab
+
+# Cambiar tipo de instancia (ej: t2.micro -> t2.small)
+aws ec2 modify-instance-attribute --instance-id i-018c1c4ee3f89d726 \
+  --instance-type "{\"Value\": \"t2.small\"}" --profile pra_kappa_lab
+
+# Iniciar la instancia
+aws ec2 start-instances --instance-ids i-018c1c4ee3f89d726 --profile pra_kappa_lab
+```
+
+#### Cómo responder a una alarma
+
+| Alarma | Acción recomendada |
+|--------|--------------------|
+| CPU > 80% | Verificar procesos con `htop`, considerar escalar instancia |
+| Network > 50MB | Revisar conexiones con `ss -tun`, posible ataque DDoS |
+| Status Check Failed | Verificar logs en consola AWS, reiniciar si es necesario |
+
+---
+
+### Estrategia de Seguridad Implementada
+
+| Capa | Medida | Descripción |
+|------|--------|-------------|
+| **Red** | Security Group | Solo puertos 22, 80, 443 abiertos |
+| **Red** | UFW Firewall | Deny all incoming por defecto |
+| **Acceso** | SSH Key Only | Sin password authentication |
+| **Acceso** | Fail2Ban | Bloqueo tras 3 intentos fallidos |
+| **Parches** | SSM Patch Manager | Actualizaciones automáticas semanales |
+| **Monitoreo** | CloudWatch Alarms | Alertas proactivas de anomalías |
+| **Monitoreo** | Dashboard | Visibilidad en tiempo real |
+
+---
+
+### Diagrama de Arquitectura Completo
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         AWS Cloud (us-east-1)                        │
+│                                                                     │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                    VPC: vpc-cloudops                           │  │
+│  │                    CIDR: 10.25.0.0/16                         │  │
+│  │                                                               │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │  Subnet: sub-cloudops-public1 (10.25.1.0/28)            │  │  │
+│  │  │                                                         │  │  │
+│  │  │  ┌───────────────────────────────────────────────┐  │  │  │
+│  │  │  │  EC2: fintech-server (t2.micro)                    │  │  │  │
+│  │  │  │  OS: Ubuntu 22.04 LTS                              │  │  │  │
+│  │  │  │  IP Pública: 44.201.227.98                          │  │  │  │
+│  │  │  │  IP Privada: 10.25.1.9                              │  │  │  │
+│  │  │  │  Rol: ssm-ec2rol                                    │  │  │  │
+│  │  │  │                                                     │  │  │  │
+│  │  │  │  Servicios internos:                                │  │  │  │
+│  │  │  │  • SSH (puerto 22)                                  │  │  │  │
+│  │  │  │  • UFW Firewall                                    │  │  │  │
+│  │  │  │  • Fail2Ban                                        │  │  │  │
+│  │  │  │  • SSM Agent                                       │  │  │  │
+│  │  │  └───────────────────────────────────────────────┘  │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌─────────────────────────────┐  ┌─────────────────────────────┐  │
+│  │  CloudWatch                    │  │  Systems Manager             │  │
+│  │  • Dashboard                   │  │  • Patch Baseline             │  │
+│  │  • Alarmas (CPU, Red, Status)  │  │  • Maintenance Window         │  │
+│  │  • Métricas automáticas        │  │  • RunPatchBaseline (Install) │  │
+│  └─────────────────────────────┘  └─────────────────────────────┘  │
+│                                                                     │
+│  Security Group: fintech-server-sg                                  │
+│  Inbound: 22/tcp, 80/tcp, 443/tcp | Outbound: All                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Inventario de Recursos AWS Creados
+
+| Recurso | Tipo | ID/Nombre |
+|---------|------|-----------|
+| EC2 Instance | Instancia | `i-018c1c4ee3f89d726` |
+| Key Pair | Clave SSH | `fintech-server-key` |
+| Security Group | SG | `sg-08ad8f32ab059ff6b` |
+| CloudWatch Alarm | Alarma | `fintech-server-cpu-alta` |
+| CloudWatch Alarm | Alarma | `fintech-server-network-in-alta` |
+| CloudWatch Alarm | Alarma | `fintech-server-status-check` |
+| CloudWatch Dashboard | Dashboard | `fintech-server-monitoring` |
+| SSM Patch Baseline | Baseline | `pb-0fcf6d215d77dee5d` |
+| SSM Maintenance Window | Window | `mw-05de16f63197e1e7a` |
+| IAM Role (existente) | Rol | `ssm-ec2rol` |
+
+---
+
+### Comandos de Referencia Rápida
 
 | Acción | Comando |
 |--------|---------|
@@ -404,3 +530,42 @@ Se definen umbrales de alerta (CPU>80%, RAM>85%, Disco>90%) y se revisan periód
 | Ver parches pendientes | `apt list --upgradable` |
 | Ver logs de fail2ban | `sudo fail2ban-client status sshd` |
 | Reiniciar servicio | `sudo systemctl restart <servicio>` |
+| Ver alarmas CloudWatch | `aws cloudwatch describe-alarms --alarm-name-prefix fintech-server --profile pra_kappa_lab` |
+| Ver estado SSM | `aws ssm describe-instance-information --profile pra_kappa_lab` |
+| Ejecutar scan de parches | `aws ssm send-command --document-name AWS-RunPatchBaseline --targets Key=tag:Patch\ Group,Values=fintech-servers --parameters Operation=Scan --profile pra_kappa_lab` |
+
+---
+
+### Script de Limpieza de Recursos
+
+```bash
+# Eliminar alarmas CloudWatch
+aws cloudwatch delete-alarms --alarm-names fintech-server-cpu-alta fintech-server-network-in-alta fintech-server-status-check --profile pra_kappa_lab
+
+# Eliminar dashboard
+aws cloudwatch delete-dashboards --dashboard-names fintech-server-monitoring --profile pra_kappa_lab
+
+# Eliminar maintenance window
+aws ssm delete-maintenance-window --window-id mw-05de16f63197e1e7a --profile pra_kappa_lab
+
+# Deregistrar patch baseline del patch group
+aws ssm deregister-patch-baseline-for-patch-group --baseline-id pb-0fcf6d215d77dee5d --patch-group fintech-servers --profile pra_kappa_lab
+
+# Eliminar patch baseline
+aws ssm delete-patch-baseline --baseline-id pb-0fcf6d215d77dee5d --profile pra_kappa_lab
+
+# Desasociar instance profile
+aws ec2 disassociate-iam-instance-profile --association-id iip-assoc-0925fc5ee0432392f --profile pra_kappa_lab
+
+# Terminar instancia EC2
+aws ec2 terminate-instances --instance-ids i-018c1c4ee3f89d726 --profile pra_kappa_lab
+
+# Esperar a que termine
+aws ec2 wait instance-terminated --instance-ids i-018c1c4ee3f89d726 --profile pra_kappa_lab
+
+# Eliminar security group
+aws ec2 delete-security-group --group-id sg-08ad8f32ab059ff6b --profile pra_kappa_lab
+
+# Eliminar key pair
+aws ec2 delete-key-pair --key-name fintech-server-key --profile pra_kappa_lab
+```
