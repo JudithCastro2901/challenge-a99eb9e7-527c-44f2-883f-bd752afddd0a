@@ -227,37 +227,106 @@ aws cloudwatch put-metric-alarm --alarm-name "fintech-server-status-check" \
 
 ## Fase 3: Aplicación de Parches de Seguridad
 
-Se implementó un proceso seguro de parcheo con los siguientes pasos:
+Se implementó un proceso automatizado de parcheo usando **AWS Systems Manager Patch Manager**.
 
-### 3.1 Verificación de parches disponibles
+### 3.1 Configuración de SSM en la instancia
 
-```bash
-sudo apt list --upgradable
-```
-
-### 3.2 Backup pre-parche
+Se asoció el rol `ssm-ec2rol` a la EC2 para permitir comunicación con Systems Manager:
 
 ```bash
-dpkg --get-selections > /tmp/packages_backup_$(date +%Y%m%d).txt
+# Asociar rol SSM a la instancia
+aws ec2 associate-iam-instance-profile --instance-id i-018c1c4ee3f89d726 \
+  --iam-instance-profile Name=ssm-ec2rol --profile pra_kappa_lab
 ```
 
-### 3.3 Aplicación de parches
+Se verificó que la instancia aparece como **Online** en SSM:
+```bash
+aws ssm describe-instance-information --filters "Key=InstanceIds,Values=i-018c1c4ee3f89d726" --profile pra_kappa_lab
+```
+
+### 3.2 Creación de Patch Baseline
+
+Se creó una política de parches que solo aprueba parches de prioridad Required e Important, con aprobación automática a los 3 días:
 
 ```bash
-sudo apt-get upgrade -y
+aws ssm create-patch-baseline \
+  --name "fintech-security-patch-baseline" \
+  --description "Patch baseline para servidores fintech - solo parches de seguridad" \
+  --operating-system UBUNTU \
+  --approval-rules "PatchRules=[{PatchFilterGroup={PatchFilters=[{Key=PRIORITY,Values=[Required,Important]},{Key=SECTION,Values=[All]}]},ApproveAfterDays=3,ComplianceLevel=HIGH}]" \
+  --approved-patches-compliance-level HIGH \
+  --profile pra_kappa_lab
 ```
 
-### 3.4 Verificación post-parche
+**Baseline ID:** `pb-0fcf6d215d77dee5d`
+
+### 3.3 Registro de Patch Group
+
+Se etiquetó la instancia con un Patch Group y se asoció a la baseline:
 
 ```bash
-echo "Kernel: $(uname -r)"
-echo "Paquetes pendientes: $(apt list --upgradable 2>/dev/null | grep -v Listing | wc -l)"
-echo "sshd: $(systemctl is-active sshd)"
-echo "ufw: $(systemctl is-active ufw)"
-echo "fail2ban: $(systemctl is-active fail2ban)"
+# Etiquetar la instancia
+aws ec2 create-tags --resources i-018c1c4ee3f89d726 \
+  --tags "Key=Patch Group,Value=fintech-servers" --profile pra_kappa_lab
+
+# Registrar baseline con el patch group
+aws ssm register-patch-baseline-for-patch-group \
+  --baseline-id pb-0fcf6d215d77dee5d \
+  --patch-group "fintech-servers" --profile pra_kappa_lab
 ```
 
-**Resultado:** Sistema actualizado, 0 parches pendientes, todos los servicios activos.
+### 3.4 Maintenance Window (Ventana de Mantenimiento)
+
+Se creó una ventana de mantenimiento programada para ejecutar el parcheo automáticamente cada domingo a las 3AM UTC:
+
+```bash
+# Crear ventana de mantenimiento
+aws ssm create-maintenance-window \
+  --name "fintech-patch-window" \
+  --description "Ventana de mantenimiento para parches - Domingos 3AM UTC" \
+  --schedule "cron(0 3 ? * SUN *)" \
+  --duration 2 --cutoff 1 \
+  --allow-unassociated-targets --profile pra_kappa_lab
+
+# Registrar target (instancias del patch group)
+aws ssm register-target-with-maintenance-window \
+  --window-id mw-05de16f63197e1e7a \
+  --resource-type INSTANCE \
+  --targets "Key=tag:Patch Group,Values=fintech-servers" --profile pra_kappa_lab
+
+# Registrar tarea de parcheo
+aws ssm register-task-with-maintenance-window \
+  --window-id mw-05de16f63197e1e7a \
+  --task-type RUN_COMMAND \
+  --targets "Key=WindowTargetIds,Values=7073f61a-f6eb-4cfe-a499-26b234042815" \
+  --task-arn "AWS-RunPatchBaseline" \
+  --task-invocation-parameters '{"RunCommand":{"Parameters":{"Operation":["Install"]}}}' \
+  --max-concurrency "1" --max-errors "0" --priority 1 --profile pra_kappa_lab
+```
+
+**Window ID:** `mw-05de16f63197e1e7a`
+
+### 3.5 Resumen de la estrategia de parches
+
+| Componente | Configuración |
+|------------|---------------|
+| **Patch Baseline** | Solo prioridad Required e Important |
+| **Aprobación** | Automática después de 3 días |
+| **Ventana de mantenimiento** | Domingos 3:00 AM UTC |
+| **Duración máxima** | 2 horas |
+| **Concurrencia** | 1 instancia a la vez |
+| **Tolerancia a errores** | 0 (se detiene si falla) |
+| **Compliance** | HIGH |
+
+### 3.6 Aplicación manual de parches (ejecutada en Fase 1)
+
+Adicionalmente se ejecutó un parcheo manual durante la configuración inicial:
+
+```bash
+sudo apt-get update -y && sudo apt-get upgrade -y
+```
+
+**Resultado:** 15 paquetes actualizados, 0 parches pendientes, todos los servicios activos.
 
 ![Aplicación de parches](parches.png)
 
